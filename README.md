@@ -93,6 +93,36 @@ func main() {
 }
 ```
 
+## Examples
+
+El repositorio incluye binarios listos para pruebas manuales:
+
+- `go run ./examples/server`
+- `go run ./examples/client`
+
+La guia completa de uso y el flujo de prueba minimo estan en `examples/README.md`.
+
+### Arranque rapido del servidor
+
+```bash
+go run ./examples/server \
+	-key ./tmp/server.key
+```
+
+El proceso imprime el `peer id` y las direcciones completas que puedes reutilizar como `-bootstrap` y `-relay` desde los clientes.
+
+### Arranque rapido del cliente
+
+```bash
+go run ./examples/client \
+	-key ./tmp/client-a.key \
+	-bootstrap "/ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooW..." \
+	-relay "/ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooW..." \
+	-topic chat.global
+```
+
+Para publicar en GossipSub necesitas al menos otro peer suscrito al mismo topico; por eso el flujo recomendado usa dos clientes.
+
 ## Notas de implementacion
 
 - Los metodos de red mas sensibles aceptan `context.Context` para timeout y cancelacion.
