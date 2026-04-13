@@ -341,6 +341,20 @@ func (c *ClientNode) SendDirectMessage(ctx context.Context, peerID peer.ID, data
 	return nil
 }
 
+func (c *ClientNode) ConnectedPeers() []peer.ID {
+	peers := c.host.Network().Peers()
+	result := make([]peer.ID, len(peers))
+	copy(result, peers)
+	return result
+}
+
+func (c *ClientNode) DisconnectPeer(peerID peer.ID) error {
+	if err := c.host.Network().ClosePeer(peerID); err != nil {
+		return fmt.Errorf("disconnect peer %s: %w", peerID, err)
+	}
+	return nil
+}
+
 func (c *ClientNode) Close() error {
 	c.mu.Lock()
 	if c.closed {
