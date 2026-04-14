@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +23,7 @@ func main() {
 	keyPath := flag.String("key", "./interactive_identity.key", "path to the client identity key")
 	bootstrap := flag.String("bootstrap", "", "comma-separated bootstrap peer multiaddrs")
 	relayAddr := flag.String("relay", "", "relay multiaddr to reserve a slot on after startup")
-	defaultTopic := flag.String("topic", "chat.global", "default pubsub topic")
+	defaultTopic := flag.String("topic", "", "optional initial current topic; does not auto-subscribe")
 	protocolPrefix := flag.String("protocol", "/synap2p", "protocol prefix for the DHT")
 	flag.Parse()
 
@@ -49,15 +50,9 @@ func main() {
 	}()
 
 	currentTopic := strings.TrimSpace(*defaultTopic)
-	if currentTopic == "" {
-		currentTopic = "chat.global"
-	}
+	subscribedTopics := map[string]struct{}{}
 
-	if err := subscribeTopic(client, currentTopic); err != nil {
-		log.Fatalf("subscribe default topic %q: %v", currentTopic, err)
-	}
-
-	printBanner(client, currentTopic)
+	printBanner(client, currentTopic, subscribedTopics)
 
 	if strings.TrimSpace(*relayAddr) != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
@@ -88,7 +83,7 @@ func main() {
 				return
 			}
 
-			nextTopic, shouldExit := handleCommand(client, currentTopic, line)
+			nextTopic, shouldExit := handleCommand(client, currentTopic, subscribedTopics, line)
 			if shouldExit {
 				return
 			}
@@ -98,7 +93,7 @@ func main() {
 	}
 }
 
-func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (string, bool) {
+func handleCommand(client *quicnet.ClientNode, currentTopic string, subscribedTopics map[string]struct{}, line string) (string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return currentTopic, false
@@ -109,7 +104,7 @@ func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (strin
 
 	switch command {
 	case "/help":
-		printHelp(currentTopic)
+		printHelp(currentTopic, subscribedTopics)
 	case "/exit", "/quit":
 		fmt.Println("[INFO] Saliendo...")
 		return currentTopic, true
@@ -146,6 +141,10 @@ func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (strin
 			fmt.Println("Uso: /pub <mensaje>")
 			return currentTopic, false
 		}
+		if currentTopic == "" {
+			fmt.Println("[ERR] No hay topic actual. Usa /sub y luego /use antes de publicar.")
+			return currentTopic, false
+		}
 		message := strings.TrimSpace(strings.TrimPrefix(trimmed, "/pub"))
 		if err := publish(client, currentTopic, message); err != nil {
 			fmt.Printf("[ERR] No se pudo publicar: %v\n", err)
@@ -158,11 +157,58 @@ func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (strin
 			return currentTopic, false
 		}
 		topic := parts[1]
+		if _, exists := subscribedTopics[topic]; exists {
+			fmt.Printf("[INFO] Ya estabas suscrito a %s\n", topic)
+			return currentTopic, false
+		}
 		if err := subscribeTopic(client, topic); err != nil {
 			fmt.Printf("[ERR] No se pudo suscribir: %v\n", err)
 			return currentTopic, false
 		}
+		subscribedTopics[topic] = struct{}{}
 		fmt.Printf("[OK] Suscrito a %s\n", topic)
+		if currentTopic == "" {
+			fmt.Printf("[INFO] No habia topic actual. Usa /use %s para publicarlo por defecto.\n", topic)
+		}
+		return currentTopic, false
+	case "/unsub":
+		if len(parts) != 2 {
+			fmt.Println("Uso: /unsub <topic>")
+			return currentTopic, false
+		}
+		topic := parts[1]
+		if _, exists := subscribedTopics[topic]; !exists {
+			fmt.Printf("[INFO] No estabas suscrito a %s\n", topic)
+			return currentTopic, false
+		}
+		if err := client.Unsubscribe(topic); err != nil {
+			fmt.Printf("[ERR] No se pudo desuscribir: %v\n", err)
+			return currentTopic, false
+		}
+		delete(subscribedTopics, topic)
+		if currentTopic == topic {
+			currentTopic = nextCurrentTopic(subscribedTopics)
+			if currentTopic == "" {
+				fmt.Printf("[OK] Desuscrito de %s. Ya no hay topic actual. Usa /use o /sub.\n", topic)
+				return currentTopic, false
+			}
+			fmt.Printf("[OK] Desuscrito de %s. Topic actual: %s\n", topic, currentTopic)
+			return currentTopic, false
+		}
+		fmt.Printf("[OK] Desuscrito de %s\n", topic)
+	case "/topics":
+		printTopics(currentTopic, subscribedTopics)
+	case "/use":
+		if len(parts) != 2 {
+			fmt.Println("Uso: /use <topic>")
+			return currentTopic, false
+		}
+		topic := parts[1]
+		if _, exists := subscribedTopics[topic]; !exists {
+			fmt.Printf("[ERR] No estas suscrito a %s. Usa /sub primero.\n", topic)
+			return currentTopic, false
+		}
+		fmt.Printf("[OK] Topic actual cambiado a %s\n", topic)
 		return topic, false
 	case "/provide":
 		if len(parts) != 2 {
@@ -251,6 +297,10 @@ func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (strin
 		}
 		fmt.Printf("[OK] Peer desconectado: %s\n", peerID)
 	default:
+		if currentTopic == "" {
+			fmt.Println("[ERR] No hay topic actual. Usa /sub y luego /use antes de publicar.")
+			return currentTopic, false
+		}
 		if err := publish(client, currentTopic, trimmed); err != nil {
 			fmt.Printf("[ERR] No se pudo publicar: %v\n", err)
 			return currentTopic, false
@@ -259,6 +309,13 @@ func handleCommand(client *quicnet.ClientNode, currentTopic, line string) (strin
 	}
 
 	return currentTopic, false
+}
+
+func nextCurrentTopic(subscribedTopics map[string]struct{}) string {
+	for topic := range subscribedTopics {
+		return topic
+	}
+	return ""
 }
 
 func subscribeTopic(client *quicnet.ClientNode, topic string) error {
@@ -303,23 +360,26 @@ func splitCSV(value string) []string {
 	return items
 }
 
-func printBanner(client *quicnet.ClientNode, currentTopic string) {
+func printBanner(client *quicnet.ClientNode, currentTopic string, subscribedTopics map[string]struct{}) {
 	fmt.Println("Iniciando nodo P2P interactivo...")
 	fmt.Printf("Peer ID: %s\n", client.ID())
 	for _, addr := range client.Addrs() {
 		fmt.Printf("Escuchando en: %s/p2p/%s\n", addr, client.ID())
 	}
 	fmt.Println(strings.Repeat("=", 62))
-	printHelp(currentTopic)
+	printHelp(currentTopic, subscribedTopics)
 	fmt.Println(strings.Repeat("=", 62))
 }
 
-func printHelp(currentTopic string) {
+func printHelp(currentTopic string, subscribedTopics map[string]struct{}) {
 	fmt.Println("Comandos disponibles:")
 	fmt.Println("  /dial <multiaddr>      -> Conectarse a otro peer")
 	fmt.Println("  /relay <multiaddr>     -> Reservar slot en relay")
 	fmt.Println("  /pub <mensaje>         -> Publicar en el topic actual")
-	fmt.Println("  /sub <topic>           -> Suscribirse y cambiar topic actual")
+	fmt.Println("  /sub <topic>           -> Suscribirse a un topic")
+	fmt.Println("  /unsub <topic>         -> Desuscribirse de un topic")
+	fmt.Println("  /topics                -> Listar topics suscritos")
+	fmt.Println("  /use <topic>           -> Cambiar el topic actual")
 	fmt.Println("  /provide <cid>         -> Anunciar un CID en Kademlia")
 	fmt.Println("  /unprovide <cid>       -> Dejar de reanunciar un CID")
 	fmt.Println("  /find <cid>            -> Buscar providers de un CID")
@@ -328,6 +388,34 @@ func printHelp(currentTopic string) {
 	fmt.Println("  /disconnect <peer-id>  -> Cerrar conexion con un peer")
 	fmt.Println("  /help                  -> Mostrar esta ayuda")
 	fmt.Println("  /exit                  -> Salir")
-	fmt.Printf("  <texto libre>          -> Publicar en %s\n", currentTopic)
+	if currentTopic == "" {
+		fmt.Println("  <texto libre>          -> Publicar en el topic actual (ninguno seleccionado)")
+	} else {
+		fmt.Printf("  <texto libre>          -> Publicar en %s\n", currentTopic)
+	}
+	printTopics(currentTopic, subscribedTopics)
+	fmt.Println("Flujo manual sugerido: /relay -> /dial -> /sub -> /use -> /pub")
 	fmt.Println("Nota: /provide y /find usan CIDs validos, no texto arbitrario.")
+}
+
+func printTopics(currentTopic string, subscribedTopics map[string]struct{}) {
+	if len(subscribedTopics) == 0 {
+		fmt.Println("Topics suscritos: ninguno")
+		return
+	}
+
+	topics := make([]string, 0, len(subscribedTopics))
+	for topic := range subscribedTopics {
+		topics = append(topics, topic)
+	}
+	sort.Strings(topics)
+
+	fmt.Println("Topics suscritos:")
+	for _, topic := range topics {
+		marker := " "
+		if topic == currentTopic {
+			marker = "*"
+		}
+		fmt.Printf("  %s %s\n", marker, topic)
+	}
 }

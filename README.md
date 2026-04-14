@@ -100,6 +100,7 @@ El repositorio incluye binarios listos para pruebas manuales:
 - `go run ./examples/server`
 - `go run ./examples/client`
 - `go run ./examples/interactive`
+- `go run ./examples/websocket`
 
 La guia completa de uso y el flujo de prueba minimo estan en `examples/README.md`.
 

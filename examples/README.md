@@ -73,6 +73,7 @@ El `client-a` debe imprimir `direct message from ...: ping directo`.
 - `examples/server`: `-key`, `-listen`, `-bootstrap`, `-protocol`
 - `examples/client`: `-key`, `-bootstrap`, `-relay`, `-peer`, `-topic`, `-message`, `-direct-peer`, `-direct-message`, `-protocol`
 - `examples/interactive`: `-key`, `-bootstrap`, `-relay`, `-topic`, `-protocol`
+- `examples/websocket`: `-key`, `-listen`, `-path`, `-bootstrap`, `-protocol`
 
 ## Cliente interactivo
 
@@ -86,13 +87,40 @@ go run ./examples/interactive \
   -topic chat.global
 ```
 
+`-topic` ahora solo define el topic actual sugerido; no suscribe automaticamente. Para publicar, primero usa `/sub <topic>` y luego `/use <topic>` si todavia no hay topic actual activo.
+
 Una vez levantado, acepta estos comandos:
 
 - `/dial <multiaddr>` para conectar manualmente a un peer.
 - `/relay <multiaddr>` para reservar un slot en un relay.
 - `/pub <mensaje>` o texto libre para publicar en el topic actual.
-- `/sub <topic>` para suscribirte a otro topic y usarlo como topic actual.
+- `/sub <topic>` para suscribirte a un topic.
+- `/unsub <topic>` para desuscribirte de un topic.
+- `/topics` para listar todos los topics suscritos.
+- `/use <topic>` para elegir el topic actual de publicacion.
 - `/provide <cid>` y `/find <cid>` para anunciar y buscar providers en la DHT.
 - `/peers`, `/ping <peer-id>` y `/disconnect <peer-id>` para inspeccion y mensajes directos.
 
+Flujo manual recomendado de pruebas: `/relay`, `/dial`, `/sub`, `/use`, `/pub`.
+
 Importante: a diferencia de tu ejemplo de Rust, aqui la capa DHT expone CIDs como identificador de contenido. `provide` y `find` no aceptan texto arbitrario; usa un CID valido.
+
+## Cliente controlado por WebSocket
+
+Arranque basico:
+
+```bash
+go run ./examples/websocket \
+  -key ./tmp/ws-a.key \
+  -listen 127.0.0.1:8080 \
+  -path /ws
+```
+
+Este ejemplo abre un servidor WebSocket local y crea un `ClientNode` por cada conexion WebSocket entrante.
+
+- Solo acepta frames binarios.
+- El protocolo usa `opcode + longitudes + payloads` en big-endian.
+- Comandos soportados en esta primera version: `relay`, `dial`, `sub`, `use`, `pub`, `peers`.
+- Al conectar, el servidor envia un frame inicial con el `peer id` local y las direcciones de escucha.
+
+La especificacion completa del frame binario esta en `examples/websocket/PROTOCOL.md`.
