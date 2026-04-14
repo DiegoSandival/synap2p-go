@@ -14,7 +14,7 @@ Cada request empieza con 1 byte de opcode.
 
 ```text
 +--------+-------------------+
-| opcode | payload especifico |
+| opcode | payload especifico|
 +--------+-------------------+
 ```
 

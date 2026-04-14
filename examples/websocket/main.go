@@ -18,18 +18,22 @@ import (
 
 	quicnet "github.com/DiegoSandival/synap2p-go"
 	"github.com/gorilla/websocket"
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 )
 
 const (
 	commandTimeout = 15 * time.Second
 
-	cmdRelay = 0x01
-	cmdDial  = 0x02
-	cmdSub   = 0x03
-	cmdUse   = 0x04
-	cmdPub   = 0x05
-	cmdPeers = 0x06
+	cmdRelay       = 0x01
+	cmdDial        = 0x02
+	cmdSub         = 0x03
+	cmdUse         = 0x04
+	cmdPub         = 0x05
+	cmdPeers       = 0x06
+	cmdGenerateCID = 0x0D
 
 	respOK    = 0x00
 	respError = 0x01
@@ -84,7 +88,7 @@ func main() {
 	}
 
 	log.Printf("websocket example listening on ws://%s%s", *listenAddr, *path)
-	log.Printf("supported commands: relay(0x01), dial(0x02), sub(0x03), use(0x04), pub(0x05), peers(0x06)")
+	log.Printf("supported commands: relay(0x01), dial(0x02), sub(0x03), use(0x04), pub(0x05), peers(0x06), generateCID(0x0D)")
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -296,6 +300,23 @@ func (s *wsSession) handleFrame(frame []byte) error {
 		}
 		return s.sendPeers()
 
+	case cmdGenerateCID:
+		data, rest, err := readU32Bytes(payload)
+		if err != nil || len(rest) != 0 {
+			return s.sendError(opcode, "invalid generateCID frame")
+		}
+		prefix := cid.Prefix{
+			Version:  1,
+			Codec:    uint64(multicodec.Raw),
+			MhType:   multihash.SHA2_256,
+			MhLength: -1,
+		}
+		contentID, err := prefix.Sum(data)
+		if err != nil {
+			return s.sendError(opcode, err.Error())
+		}
+		return s.sendCIDResponse(contentID)
+
 	default:
 		return s.sendError(opcode, fmt.Sprintf("unknown opcode 0x%02x", opcode))
 	}
@@ -342,6 +363,13 @@ func (s *wsSession) sendPeers() error {
 	for _, peerID := range peerStrings {
 		payload = appendU16Bytes(payload, []byte(peerID))
 	}
+	return s.writeBinary(payload)
+}
+
+func (s *wsSession) sendCIDResponse(cid cid.Cid) error {
+	cidBytes := []byte(cid.String())
+	payload := []byte{respOK, cmdGenerateCID}
+	payload = appendU16Bytes(payload, cidBytes)
 	return s.writeBinary(payload)
 }
 

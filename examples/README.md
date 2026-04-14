@@ -68,6 +68,25 @@ go run ./examples/client \
 
 El `client-a` debe imprimir `direct message from ...: ping directo`.
 
+## 5. Crear un CID
+
+Este ejemplo muestra como crear un Content Identifier (CID) a partir de datos arbitrarios:
+
+```bash
+go run ./examples/cid
+```
+
+Salida de ejemplo:
+
+```
+CID v1 (Raw): bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e
+CID v0: QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4
+Son iguales: false
+CID parseado: bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e
+```
+
+Este CID puede usarse con los comandos `/provide` y `/find` en el cliente interactivo para anunciar y buscar contenido en la DHT.
+
 ## Flags utiles
 
 - `examples/server`: `-key`, `-listen`, `-bootstrap`, `-protocol`
