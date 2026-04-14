@@ -104,6 +104,8 @@ El repositorio incluye binarios listos para pruebas manuales:
 
 La guia completa de uso y el flujo de prueba minimo estan en `examples/README.md`.
 
+Para diagnostico de red, el cliente interactivo soporta `-debug`, que activa trazas propias (`SYNAP2P_DEBUG=1`) y sube `GOLOG_LOG_LEVEL=debug` para mostrar logs detallados de libp2p.
+
 ### Arranque rapido del servidor
 
 ```bash

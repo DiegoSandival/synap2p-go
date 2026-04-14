@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -300,18 +303,22 @@ func (c *ClientNode) ConnectToRelay(ctx context.Context, relayMultiaddr string) 
 	if err != nil {
 		return fmt.Errorf("parse relay address: %w", err)
 	}
+	debugf("connect relay requested: relay=%s addr=%s", info.ID, relayMultiaddr)
 	if err := c.connectAddrInfo(ctx, info); err != nil {
+		debugf("connect relay failed: relay=%s err=%v", info.ID, err)
 		return err
 	}
 
 	reservation, err := relayclient.Reserve(ctx, c.host, info)
 	if err != nil {
+		debugf("relay reservation failed: relay=%s err=%v", info.ID, err)
 		return fmt.Errorf("reserve relay slot with %s: %w", info.ID, err)
 	}
 
 	c.mu.Lock()
 	c.relayReservations[info.ID] = reservation
 	c.mu.Unlock()
+	debugf("relay reservation ok: relay=%s", info.ID)
 	return nil
 }
 
@@ -320,6 +327,7 @@ func (c *ClientNode) ConnectToPeer(ctx context.Context, peerAddr string) error {
 	if err != nil {
 		return fmt.Errorf("parse peer address: %w", err)
 	}
+	debugf("connect peer requested: peer=%s addr=%s", info.ID, peerAddr)
 	return c.connectAddrInfo(ctx, info)
 }
 
@@ -497,6 +505,7 @@ func (c *ClientNode) handleDiscoveredPeer(info peer.AddrInfo) {
 	if info.ID == c.host.ID() {
 		return
 	}
+	debugf("peer discovered: peer=%s addrs=%v", info.ID, info.Addrs)
 
 	c.host.Peerstore().AddAddrs(info.ID, info.Addrs, peerstore.PermanentAddrTTL)
 	c.wg.Add(1)
@@ -509,11 +518,31 @@ func (c *ClientNode) handleDiscoveredPeer(info peer.AddrInfo) {
 }
 
 func (c *ClientNode) connectAddrInfo(ctx context.Context, info peer.AddrInfo) error {
+	debugf("dial start: peer=%s addrs=%v", info.ID, info.Addrs)
 	c.host.Peerstore().AddAddrs(info.ID, info.Addrs, peerstore.PermanentAddrTTL)
 	if err := c.host.Connect(ctx, info); err != nil {
+		debugf("dial failed: peer=%s err=%v", info.ID, err)
 		return fmt.Errorf("connect to %s: %w", info.ID, err)
 	}
+	debugf("dial ok: peer=%s", info.ID)
 	return nil
+}
+
+func debugf(format string, args ...any) {
+	if !isDebugEnabled() {
+		return
+	}
+	log.Printf("[synap2p-debug] "+format, args...)
+}
+
+func isDebugEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SYNAP2P_DEBUG")))
+	switch v {
+	case "1", "true", "yes", "on", "debug":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *ClientNode) bootstrapKnownPeers(peers []peer.AddrInfo) {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	quicnet "github.com/DiegoSandival/synap2p-go"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -25,7 +26,21 @@ func main() {
 	relayAddr := flag.String("relay", "", "relay multiaddr to reserve a slot on after startup")
 	defaultTopic := flag.String("topic", "", "optional initial current topic; does not auto-subscribe")
 	protocolPrefix := flag.String("protocol", "/synap2p", "protocol prefix for the DHT")
+	debug := flag.Bool("debug", false, "enable verbose logs for synap2p and libp2p")
 	flag.Parse()
+
+	if *debug {
+		_ = os.Setenv("SYNAP2P_DEBUG", "1")
+		if strings.TrimSpace(os.Getenv("GOLOG_LOG_LEVEL")) == "" {
+			_ = os.Setenv("GOLOG_LOG_LEVEL", "debug")
+		}
+		// GOLOG_LOG_LEVEL via env can be too late if init() already ran in deps.
+		// Force debug level programmatically for already-initialized loggers.
+		logging.SetDebugLogging()
+		log.Printf("[debug] SYNAP2P_DEBUG=1")
+		log.Printf("[debug] GOLOG_LOG_LEVEL=%s", os.Getenv("GOLOG_LOG_LEVEL"))
+		log.Printf("[debug] go-log level forced to debug via SetDebugLogging()")
+	}
 
 	var client *quicnet.ClientNode
 
@@ -255,7 +270,7 @@ func handleCommand(client *quicnet.ClientNode, currentTopic string, subscribedTo
 		for _, provider := range providers {
 			fmt.Printf("  - %s %v\n", provider.ID, provider.Addrs)
 		}
-	case "/peers":
+	case "/peers", "/peer":
 		peers := client.ConnectedPeers()
 		if len(peers) == 0 {
 			fmt.Println("[INFO] No hay peers conectados.")
@@ -404,7 +419,7 @@ func printHelp(currentTopic string, subscribedTopics map[string]struct{}) {
 	fmt.Println("  /provide <cid>         -> Anunciar un CID en Kademlia")
 	fmt.Println("  /unprovide <cid>       -> Dejar de reanunciar un CID")
 	fmt.Println("  /find <cid>            -> Buscar providers de un CID")
-	fmt.Println("  /peers                 -> Ver peers conectados")
+	fmt.Println("  /peers | /peer         -> Ver peers conectados")
 	fmt.Println("  /ping <peer-id>        -> Enviar 'ping' y esperar respuesta 'pong'")
 	fmt.Println("  /disconnect <peer-id>  -> Cerrar conexion con un peer")
 	fmt.Println("  /help                  -> Mostrar esta ayuda")

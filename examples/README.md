@@ -72,7 +72,7 @@ El `client-a` debe imprimir `direct message from ...: ping directo`.
 
 - `examples/server`: `-key`, `-listen`, `-bootstrap`, `-protocol`
 - `examples/client`: `-key`, `-bootstrap`, `-relay`, `-peer`, `-topic`, `-message`, `-direct-peer`, `-direct-message`, `-protocol`
-- `examples/interactive`: `-key`, `-bootstrap`, `-relay`, `-topic`, `-protocol`
+- `examples/interactive`: `-key`, `-bootstrap`, `-relay`, `-topic`, `-protocol`, `-debug`
 - `examples/websocket`: `-key`, `-listen`, `-path`, `-bootstrap`, `-protocol`
 
 ## Cliente interactivo
@@ -84,8 +84,11 @@ go run ./examples/interactive \
   -key ./tmp/interactive-a.key \
   -bootstrap "/ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooWServerExample" \
   -relay "/ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooWServerExample" \
+  -debug \
   -topic chat.global
 ```
+
+Si activas `-debug`, el binario habilita trazas de `synap2p` y pone `GOLOG_LOG_LEVEL=debug` (si no estaba definido) para ver detalle de dial/relay en libp2p.
 
 `-topic` ahora solo define el topic actual sugerido; no suscribe automaticamente. Para publicar, primero usa `/sub <topic>` y luego `/use <topic>` si todavia no hay topic actual activo.
 
