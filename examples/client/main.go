@@ -61,6 +61,11 @@ func main() {
 			log.Fatalf("connect to relay: %v", err)
 		}
 		log.Printf("connected to relay: %s", *relayAddr)
+		for _, addr := range client.Addrs() {
+			if strings.Contains(addr, "/p2p-circuit") {
+				log.Printf("relay address: %s/p2p/%s", addr, client.ID())
+			}
+		}
 	}
 
 	if *peerAddr != "" {

@@ -22,6 +22,7 @@ import (
 	routingdiscovery "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	discoveryutil "github.com/libp2p/go-libp2p/p2p/discovery/util"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
+	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/DiegoSandival/synap2p-go/internal/identity"
 	"github.com/DiegoSandival/synap2p-go/internal/node"
@@ -42,8 +43,13 @@ type ClientNode struct {
 	mu                sync.RWMutex
 	topics            map[string]*clientTopic
 	announcements     map[string]context.CancelFunc
-	relayReservations map[peer.ID]*relayclient.Reservation
+	relayReservations map[peer.ID]relayReservation
 	closed            bool
+}
+
+type relayReservation struct {
+	reservation *relayclient.Reservation
+	addrs       []ma.Multiaddr
 }
 
 type clientTopic struct {
@@ -146,7 +152,7 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 		cancel:            cancel,
 		topics:            make(map[string]*clientTopic),
 		announcements:     make(map[string]context.CancelFunc),
-		relayReservations: make(map[peer.ID]*relayclient.Reservation),
+		relayReservations: make(map[peer.ID]relayReservation),
 	}
 
 	h.SetStreamHandler(cfg.directProtocol, client.handleDirectStream)
@@ -168,9 +174,31 @@ func (c *ClientNode) ID() peer.ID {
 
 func (c *ClientNode) Addrs() []string {
 	addrs := c.host.Addrs()
-	result := make([]string, 0, len(addrs))
+
+	c.mu.RLock()
+	relayAddrs := make([]ma.Multiaddr, 0, len(c.relayReservations))
+	for _, reservation := range c.relayReservations {
+		relayAddrs = append(relayAddrs, reservation.addrs...)
+	}
+	c.mu.RUnlock()
+
+	result := make([]string, 0, len(addrs)+len(relayAddrs))
+	seen := make(map[string]struct{}, len(addrs)+len(relayAddrs))
 	for _, addr := range addrs {
-		result = append(result, addr.String())
+		key := addr.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, key)
+	}
+	for _, addr := range relayAddrs {
+		key := addr.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, key)
 	}
 	return result
 }
@@ -316,10 +344,40 @@ func (c *ClientNode) ConnectToRelay(ctx context.Context, relayMultiaddr string) 
 	}
 
 	c.mu.Lock()
-	c.relayReservations[info.ID] = reservation
+	c.relayReservations[info.ID] = relayReservation{
+		reservation: reservation,
+		addrs:       relayCircuitAddrs(info),
+	}
 	c.mu.Unlock()
 	debugf("relay reservation ok: relay=%s", info.ID)
 	return nil
+}
+
+func relayCircuitAddrs(info peer.AddrInfo) []ma.Multiaddr {
+	if info.ID == "" || len(info.Addrs) == 0 {
+		return nil
+	}
+
+	relaySuffix, err := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", info.ID))
+	if err != nil {
+		return nil
+	}
+
+	result := make([]ma.Multiaddr, 0, len(info.Addrs))
+	seen := make(map[string]struct{}, len(info.Addrs))
+	for _, addr := range info.Addrs {
+		if addr == nil {
+			continue
+		}
+		circuitAddr := addr.Encapsulate(relaySuffix)
+		key := circuitAddr.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, circuitAddr)
+	}
+	return result
 }
 
 func (c *ClientNode) ConnectToPeer(ctx context.Context, peerAddr string) error {

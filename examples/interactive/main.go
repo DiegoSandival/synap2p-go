@@ -153,6 +153,11 @@ func handleCommand(client *quicnet.ClientNode, currentTopic string, subscribedTo
 			return currentTopic, false
 		}
 		fmt.Printf("[OK] Relay conectado: %s\n", strings.TrimSpace(addr))
+		for _, listenAddr := range client.Addrs() {
+			if strings.Contains(listenAddr, "/p2p-circuit") {
+				fmt.Printf("[OK] Relay addr: %s/p2p/%s\n", listenAddr, client.ID())
+			}
+		}
 	case "/pub":
 		if len(parts) < 2 {
 			fmt.Println("Uso: /pub <mensaje>")
