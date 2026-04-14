@@ -27,11 +27,13 @@ func main() {
 	protocolPrefix := flag.String("protocol", "/synap2p", "protocol prefix for the DHT")
 	flag.Parse()
 
+	var client *quicnet.ClientNode
+
 	opts := []quicnet.Option{
 		quicnet.WithKeyPath(*keyPath),
 		quicnet.WithProtocolPrefix(*protocolPrefix),
 		quicnet.WithDirectMessageHandler(func(ctx context.Context, from peer.ID, data []byte) {
-			fmt.Printf("\n[DM] %s: %s\n> ", from, string(data))
+			handleDirectMessage(client, from, data)
 		}),
 	}
 
@@ -324,6 +326,25 @@ func subscribeTopic(client *quicnet.ClientNode, topic string) error {
 	})
 }
 
+func handleDirectMessage(client *quicnet.ClientNode, from peer.ID, data []byte) {
+	message := strings.TrimSpace(string(data))
+	fmt.Printf("\n[DM] %s: %s\n", from, string(data))
+
+	if client != nil && strings.EqualFold(message, "ping") {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		err := client.SendDirectMessage(ctx, from, []byte("pong"))
+		cancel()
+		if err != nil {
+			fmt.Printf("[ERR] No se pudo responder pong a %s: %v\n> ", from, err)
+			return
+		}
+		fmt.Printf("[OK] Pong enviado a %s\n> ", from)
+		return
+	}
+
+	fmt.Print("> ")
+}
+
 func publish(client *quicnet.ClientNode, topic, message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
@@ -384,7 +405,7 @@ func printHelp(currentTopic string, subscribedTopics map[string]struct{}) {
 	fmt.Println("  /unprovide <cid>       -> Dejar de reanunciar un CID")
 	fmt.Println("  /find <cid>            -> Buscar providers de un CID")
 	fmt.Println("  /peers                 -> Ver peers conectados")
-	fmt.Println("  /ping <peer-id>        -> Enviar mensaje directo 'ping'")
+	fmt.Println("  /ping <peer-id>        -> Enviar 'ping' y esperar respuesta 'pong'")
 	fmt.Println("  /disconnect <peer-id>  -> Cerrar conexion con un peer")
 	fmt.Println("  /help                  -> Mostrar esta ayuda")
 	fmt.Println("  /exit                  -> Salir")
