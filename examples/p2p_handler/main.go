@@ -14,19 +14,22 @@ import (
 )
 
 const (
-	OpRelay         byte = 0x01
-	OpDial          byte = 0x02
-	OpSub           byte = 0x03
-	OpUse           byte = 0x04
-	OpPub           byte = 0x05
-	OpPeers         byte = 0x06
-	OpUnsub         byte = 0x07
+	OpRelay byte = 0x01
+	OpDial  byte = 0x02
+	OpPeers byte = 0x03
+
+	OpSub   byte = 0x04
+	OpUse   byte = 0x05
+	OpPub   byte = 0x06
+	OpUnsub byte = 0x07
+
 	OpAnnounce      byte = 0x08
 	OpUnannounce    byte = 0x09
 	OpFindProviders byte = 0x0A
-	OpDirectMsg     byte = 0x0B
-	OpDisconnect    byte = 0x0C
-	OpGenerateCID   byte = 0x0D
+
+	OpDirectMsg   byte = 0x0B
+	OpDisconnect  byte = 0x0C
+	OpGenerateCID byte = 0x0D
 
 	OpResponseOK    byte = 0x00
 	OpResponseError byte = 0x01
