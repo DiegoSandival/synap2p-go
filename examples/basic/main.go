@@ -1,80 +1,60 @@
 package main
 
 import (
-	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
+	"time"
 
 	libp2p "github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
 	quicnet "github.com/DiegoSandival/synap2p-go"
-	"github.com/DiegoSandival/synap2p-go/protocol"
 )
 
 func main() {
-	fmt.Println("🚀 Iniciando ejemplo de Router P2P...")
-	ctx := context.Background()
+	fmt.Println("🚀 Iniciando ejemplo de Router P2P simplificado con ID de 16 bytes...")
 
-	// 1. Inicializar Host de Libp2p
 	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		log.Fatalf("Error creando host: %v", err)
 	}
 	defer h.Close()
-	fmt.Printf("✅ Host creado con ID: %s\n", h.ID().String())
 
-	// 2. Inicializar DHT
-	kdht, err := dht.New(ctx, h)
+	engine, err := quicnet.NewEngine(
+		quicnet.WithEventHandler(func(event []byte) {
+			if len(event) >= 4 {
+				opcode := event[3]
+				id := event[4:20]
+				fmt.Printf("📬 [EVENTO ASÍNCRONO] Recibido Opcode: 0x%02X, Origin ID: %v\n", opcode, id)
+			}
+		}),
+	)
 	if err != nil {
-		log.Fatalf("Error creando DHT: %v", err)
+		log.Fatalf("Error creando engine: %v", err)
 	}
-	defer kdht.Close()
-	fmt.Println("✅ IPFS DHT instanciado")
+	defer engine.Close()
 
-	// 3. Inicializar PubSub
-	ps, err := pubsub.NewGossipSub(ctx, h)
-	if err != nil {
-		log.Fatalf("Error creando PubSub: %v", err)
-	}
-	fmt.Println("✅ GossipSub instanciado")
-
-	// 4. Inyectar dependencias al CentralHandler
-	handler := quicnet.NewCentralHandler(h, kdht, ps)
-	parser := &protocol.ProtocolParser{}
-
-	// 5. Simular un mensaje entrante (Ejemplo: Opcode 0x03 -> Sub)
-	// Formato esperado de ParseU16LenPayload: [Opcode: 4] + [Len: 2] + [TopicBytes: Len]
+	// 5. Construimos el mensaje de Sub (0x03)
+	// Formato ideal = [Opcode: 4] + [ID: 16] + [Topic rest of bytes]
 	topic := "my-awesome-topic"
 	topicBytes := []byte(topic)
-	topicLen := uint16(len(topicBytes))
 
-	// Preparamos el buffer del mensaje
-	msg := make([]byte, 4+2+int(topicLen))
-
-	// Byte 3 es el opcode (como espera parser.Opcode())
+	msg := make([]byte, 20+len(topicBytes))
 	msg[3] = 0x03 // Opcode 0x03 = Sub
 
-	// Bytes 4 y 5 son el Len (U16 BigEndian)
-	binary.BigEndian.PutUint16(msg[4:6], topicLen)
+	// Simulando un ID de 16 bytes: 010203...
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	copy(msg[4:20], id)
 
-	// Bytes 6 en adelante es la carga (el string del topic)
-	copy(msg[6:], topicBytes)
+	// El resto es la carga
+	copy(msg[20:], topicBytes)
 
-	fmt.Printf("\n📦 Mensaje crudo construido: %v\n", msg)
-	fmt.Println("➡️  Enviando mensaje hacia el ProcessRequest...")
+	fmt.Printf("\n📦 Mensaje (Opcode: %d, ID: %v, Tema: %s)\n", msg[3], id, topic)
 
-	// 6. Procesar el Request a través de nuestro ruteador
-	response := quicnet.ProcessRequest(msg, parser, handler)
+	engine.Process(msg)
 
-	// Validar respuesta
-	// El formato de SuccessResponse que usamos es: [0x00, 0x00, 0x00, opcode, 0x01]
-	fmt.Printf("⬅️  Respuesta recibida: %v\n", response)
-	if len(response) == 5 && response[4] == 0x01 {
-		fmt.Println("🎉 ¡Éxito! El Dispatcher reconoció el opcode y llamó a la función Sub del CentralHandler.")
-	} else {
-		fmt.Println("❌ Mmm, parece que la petición falló o devolvió un formato inesperado.")
-	}
+	// Esperamos un segundo para darle tiempo a la rutina asíncrona de regresar el evento a la consola.
+	// En Unity/Android, el EventHandler estará siempre activo recibiendo el callback.
+	fmt.Println("⏳ Solicitud lanzada, esperando respuesta asíncrona en hilo principal...")
+	time.Sleep(1 * time.Second)
+	fmt.Println("🚀 Fin de la simulación")
 }

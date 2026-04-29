@@ -26,6 +26,7 @@ import (
 
 	"github.com/DiegoSandival/synap2p-go/internal/identity"
 	"github.com/DiegoSandival/synap2p-go/internal/node"
+	"github.com/DiegoSandival/synap2p-go/protocol"
 )
 
 type ClientNode struct {
@@ -241,6 +242,24 @@ func (c *ClientNode) Subscribe(topicName string, handler func(msg []byte)) error
 			}
 
 			data := append([]byte(nil), msg.Data...)
+
+			if c.cfg.eventHandler != nil {
+				// Parseamos para obtener el ID original (16 bytes desde offset 4 a 20)
+				// Si no tiene esta estructura, mandamos un ID de ceros
+				id := make([]byte, 16)
+				if len(data) >= 20 {
+					copy(id, data[4:20])
+				}
+
+				parser := &protocol.ProtocolParser{}
+				evtMsg := parser.FormatEventPubSub(id, data)
+				c.wg.Add(1)
+				go func(payload []byte) {
+					defer c.wg.Done()
+					c.cfg.eventHandler(payload)
+				}(evtMsg)
+			}
+
 			c.wg.Add(1)
 			go func(payload []byte) {
 				defer c.wg.Done()
@@ -257,14 +276,27 @@ func (c *ClientNode) Unsubscribe(topicName string) error {
 	defer c.mu.Unlock()
 
 	state, ok := c.topics[topicName]
-	if !ok || state.subscription == nil {
-		return fmt.Errorf("topic %q is not subscribed", topicName)
+	if !ok {
+		return fmt.Errorf("topic %q is not tracked or subscribed", topicName)
 	}
 
-	state.subCancel()
-	state.subscription.Cancel()
-	state.subscription = nil
-	state.subCancel = nil
+	if state.subCancel != nil {
+		state.subCancel()
+		state.subCancel = nil
+	}
+	if state.subscription != nil {
+		state.subscription.Cancel()
+		state.subscription = nil
+	}
+	if state.discoveryCancel != nil {
+		state.discoveryCancel()
+		state.discoveryCancel = nil
+	}
+	if state.topic != nil {
+		state.topic.Close()
+	}
+
+	delete(c.topics, topicName)
 	return nil
 }
 
@@ -421,6 +453,17 @@ func (c *ClientNode) DisconnectPeer(peerID peer.ID) error {
 	return nil
 }
 
+// EmitEvent encapsula la lógica asíncrona para enviar respuestas o eventos al EventHandler exterior
+func (c *ClientNode) EmitEvent(data []byte) {
+	if c.cfg.eventHandler != nil && !c.closed {
+		c.wg.Add(1)
+		go func(payload []byte) {
+			defer c.wg.Done()
+			c.cfg.eventHandler(payload)
+		}(data)
+	}
+}
+
 func (c *ClientNode) Close() error {
 	c.mu.Lock()
 	if c.closed {
@@ -546,6 +589,23 @@ func (c *ClientNode) handleDirectStream(stream network.Stream) {
 		_ = stream.Reset()
 		return
 	}
+
+	if c.cfg.eventHandler != nil {
+		id := make([]byte, 16)
+		if len(payload) >= 20 {
+			copy(id, payload[4:20])
+		}
+
+		parser := &protocol.ProtocolParser{}
+		evtMsg := parser.FormatEventDirectMsg(id, stream.Conn().RemotePeer().String(), payload)
+
+		c.wg.Add(1)
+		go func(data []byte) {
+			defer c.wg.Done()
+			c.cfg.eventHandler(data)
+		}(evtMsg)
+	}
+
 	if c.cfg.directHandler != nil {
 		c.wg.Add(1)
 		go func(from peer.ID, data []byte) {
@@ -564,6 +624,16 @@ func (c *ClientNode) handleDiscoveredPeer(info peer.AddrInfo) {
 		return
 	}
 	debugf("peer discovered: peer=%s addrs=%v", info.ID, info.Addrs)
+
+	if c.cfg.eventHandler != nil {
+		parser := &protocol.ProtocolParser{}
+		evtMsg := parser.FormatEventPeerDiscovered(info.ID.String())
+		c.wg.Add(1)
+		go func(data []byte) {
+			defer c.wg.Done()
+			c.cfg.eventHandler(data)
+		}(evtMsg)
+	}
 
 	c.host.Peerstore().AddAddrs(info.ID, info.Addrs, peerstore.PermanentAddrTTL)
 	c.wg.Add(1)
@@ -586,11 +656,17 @@ func (c *ClientNode) connectAddrInfo(ctx context.Context, info peer.AddrInfo) er
 	return nil
 }
 
+// LogHandler is the external logging injection point
+type LogHandler func(level, msg string)
+
+var globalLogHandler LogHandler
+
 func debugf(format string, args ...any) {
-	if !isDebugEnabled() {
-		return
+	if globalLogHandler != nil {
+		globalLogHandler("DEBUG", fmt.Sprintf(format, args...))
+	} else if isDebugEnabled() {
+		log.Printf("[synap2p-debug] "+format, args...)
 	}
-	log.Printf("[synap2p-debug] "+format, args...)
 }
 
 func isDebugEnabled() bool {

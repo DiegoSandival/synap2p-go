@@ -1,0 +1,116 @@
+/*RELAY (0x01)
+[Opcode: 4]
+[Addr Len: 2] |
+[Addr: N]*/
+
+/*RELAY result
+[Opcode: 4]
+[Status: 1]*/
+
+/*DIAL (0x02)
+[Opcode: 4]
+[Addr Len: 2] |
+[Addr: N]*/
+
+/*DIAL result
+[Opcode: 4]
+[Status: 1]*/
+
+/*SUB (0x03)
+[Opcode: 4]
+[Topic Len: 2] |
+[Topic: N]*/
+
+/*SUB result
+[Opcode: 4]
+[Status: 1]*/
+
+/*USE (0x04)
+[Opcode: 4]
+[Topic Len: 2] |
+[Topic: N]*/
+
+/*USE result
+[Opcode: 4]
+[Status: 1]*/
+
+/*PUB (0x05)
+[Opcode: 4]
+[Data Len: 4] |
+[Data: N]*/
+
+/*PUB result
+[Opcode: 4]
+[Status: 1]*/
+
+/*PEERS (0x06)
+[Opcode: 4] |*/
+
+/*PEERS result
+[Opcode: 4]
+[Status: 1]*/
+
+/*UNSUB (0x07)
+[Opcode: 4]
+[Topic Len: 2] |
+[Topic: N]*/
+
+/*UNSUB result
+[Opcode: 4]
+[Status: 1]*/
+
+/*ANNOUNCE (0x08)
+[Opcode: 4]
+[CID Len: 2] |
+[CID: N]*/
+
+/*ANNOUNCE result
+[Opcode: 4]
+[Status: 1]*/
+
+/*UNANNOUNCE (0x09)
+[Opcode: 4]
+[CID Len: 2] |
+[CID: N]*/
+
+/*UNANNOUNCE result
+[Opcode: 4]
+[Status: 1]*/
+
+/*FIND_PROVIDERS (0x0A)
+[Opcode: 4]
+[CID Len: 2] |
+[CID: N]*/
+
+/*FIND_PROVIDERS result
+[Opcode: 4]
+[Status: 1]*/
+
+/*DIRECT_MSG (0x0B)
+[Opcode: 4]
+[PeerID Len: 2] |
+[PeerID: N]
+[Data Len: 4] |
+[Data: M]*/
+
+/*DIRECT_MSG result
+[Opcode: 4]
+[Status: 1]*/
+
+/*DISCONNECT (0x0C)
+[Opcode: 4]
+[PeerID Len: 2] |
+[PeerID: N]*/
+
+/*DISCONNECT result
+[Opcode: 4]
+[Status: 1]*/
+
+/*GENERATE_CID (0x0D)
+[Opcode: 4]
+[Data Len: 4] |
+[Data: N]*/
+
+/*GENERATE_CID result
+[Opcode: 4]
+[Status: 1]*/

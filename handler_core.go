@@ -1,22 +1,12 @@
 package quicnet
 
-import (
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/host"
-)
-
 type CentralHandler struct {
-	Host   host.Host
-	DHT    *dht.IpfsDHT
-	PubSub *pubsub.PubSub
+	Client *ClientNode
 }
 
-// Inyectamos las dependencias necesarias de libp2p
-func NewCentralHandler(h host.Host, dhtInstance *dht.IpfsDHT, pubsubInstance *pubsub.PubSub) *CentralHandler {
+// Inyectamos las dependencias necesarias de la lógica (ClientNode)
+func NewCentralHandler(client *ClientNode) *CentralHandler {
 	return &CentralHandler{
-		Host:   h,
-		DHT:    dhtInstance,
-		PubSub: pubsubInstance,
+		Client: client,
 	}
 }

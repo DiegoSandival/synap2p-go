@@ -15,98 +15,114 @@ func (p *ProtocolParser) Opcode(msg []byte) byte {
 	return msg[3]
 }
 
-// Estructuras de Request para operaciones base
-type AddrReq struct {
-	Addr []byte
-}
-
-type TopicReq struct {
-	Topic []byte
-}
-
-type DataReq struct {
-	Data []byte
-}
-
-type CIDReq struct {
-	CID []byte
-}
-
-type PeerReq struct {
-	PeerID []byte
-}
-
-type DirectMsgReq struct {
-	PeerID []byte
-	Data   []byte
-}
-
-// --- Parsers Genéricos ---
-
-// ParseU16LenPayload lee un payload con formato [Opcode: 4] + [Len: 2] + [Bytes: Len]
-func (p *ProtocolParser) ParseU16LenPayload(msg []byte) ([]byte, error) {
-	if len(msg) < 6 {
-		return nil, fmt.Errorf("mensaje muy corto")
+// ParseSinglePayload asume el formato: [Opcode: 4] + [ID: 16] + [Resto como Payload]
+func (p *ProtocolParser) ParseSinglePayload(msg []byte) (id []byte, payload []byte, err error) {
+	if len(msg) < 20 {
+		return nil, nil, fmt.Errorf("mensaje muy corto, faltan opcode o ID")
 	}
-	length := int(binary.BigEndian.Uint16(msg[4:6]))
-	if len(msg) < 6+length {
-		return nil, fmt.Errorf("mensaje truncado, esperaba %d bytes", length)
+	id = make([]byte, 16)
+	copy(id, msg[4:20])
+
+	payloadLen := len(msg) - 20
+	if payloadLen > 0 {
+		payload = make([]byte, payloadLen)
+		copy(payload, msg[20:])
+	} else {
+		payload = []byte{}
 	}
-	payload := make([]byte, length)
-	copy(payload, msg[6:6+length])
-	return payload, nil
+
+	return id, payload, nil
 }
 
-// ParseU32LenPayload lee un payload con formato [Opcode: 4] + [Len: 4] + [Bytes: Len]
-func (p *ProtocolParser) ParseU32LenPayload(msg []byte) ([]byte, error) {
-	if len(msg) < 8 {
-		return nil, fmt.Errorf("mensaje muy corto")
+// ParseDirectMsg lee: [Opcode: 4] + [ID: 16] + [PeerID Len: 2] + [PeerID: N] + [Data: M]
+func (p *ProtocolParser) ParseDirectMsg(msg []byte) (id []byte, peerId []byte, data []byte, err error) {
+	if len(msg) < 22 {
+		return nil, nil, nil, fmt.Errorf("mensaje corto para DirectMsg")
 	}
-	length := int(binary.BigEndian.Uint32(msg[4:8]))
-	if len(msg) < 8+length {
-		return nil, fmt.Errorf("mensaje truncado, esperaba %d bytes", length)
-	}
-	payload := make([]byte, length)
-	copy(payload, msg[8:8+length])
-	return payload, nil
-}
+	id = make([]byte, 16)
+	copy(id, msg[4:20])
 
-// ParseDirectMsg lee [Opcode: 4] + [PeerLen: 2] + [PeerID: PeerLen] + [DataLen: 4] + [Data: DataLen]
-func (p *ProtocolParser) ParseDirectMsg(msg []byte) (DirectMsgReq, error) {
-	var req DirectMsgReq
-	if len(msg) < 6 {
-		return req, fmt.Errorf("mensaje corto para DirectMsg")
-	}
-	peerLen := int(binary.BigEndian.Uint16(msg[4:6]))
-	offset := 6
+	peerLen := int(binary.BigEndian.Uint16(msg[20:22]))
+	offset := 22
 
 	if len(msg) < offset+peerLen {
-		return req, fmt.Errorf("id de peer truncado")
+		return nil, nil, nil, fmt.Errorf("id de peer truncado")
 	}
-	req.PeerID = make([]byte, peerLen)
-	copy(req.PeerID, msg[offset:offset+peerLen])
+	peerId = make([]byte, peerLen)
+	copy(peerId, msg[offset:offset+peerLen])
 	offset += peerLen
 
-	if len(msg) < offset+4 {
-		return req, fmt.Errorf("faltan bytes para longitud de data")
+	dataLen := len(msg) - offset
+	data = make([]byte, dataLen)
+	if dataLen > 0 {
+		copy(data, msg[offset:])
 	}
-	dataLen := int(binary.BigEndian.Uint32(msg[offset : offset+4]))
-	offset += 4
 
-	if len(msg) < offset+dataLen {
-		return req, fmt.Errorf("data truncada")
-	}
-	req.Data = make([]byte, dataLen)
-	copy(req.Data, msg[offset:offset+dataLen])
-
-	return req, nil
+	return id, peerId, data, nil
 }
 
-// Utilidades para armar respuestas genéricas o de éxito (puedes personalizarlas luego)
-func (p *ProtocolParser) SuccessResponse(opcode byte) []byte {
-	return []byte{0x00, 0x00, 0x00, opcode, 0x01} // 1: Success
+func (p *ProtocolParser) SuccessResponse(opcode byte, id []byte) []byte {
+	res := make([]byte, 21) // 4 + 16 + 1
+	res[3] = opcode
+	if len(id) == 16 {
+		copy(res[4:20], id)
+	}
+	res[20] = 0x01
+	return res
 }
 
-func (p *ProtocolParser) ErrorResponse(opcode byte) []byte {
-	return []byte{0x00, 0x00, 0x00, opcode, 0x00} // 0: Error
+func (p *ProtocolParser) SuccessDataResponse(opcode byte, id []byte, data []byte) []byte {
+	res := make([]byte, 21+len(data)) // 4 + 16 + 1 (status) + data
+	res[3] = opcode
+	if len(id) == 16 {
+		copy(res[4:20], id)
+	}
+	res[20] = 0x01
+	copy(res[21:], data)
+	return res
+}
+
+func (p *ProtocolParser) ErrorResponse(opcode byte, id []byte) []byte {
+	res := make([]byte, 21) // 4 + 16 + 1
+	res[3] = opcode
+	if len(id) == 16 {
+		copy(res[4:20], id)
+	}
+	res[20] = 0x00
+	return res
+}
+
+func (p *ProtocolParser) FormatEventPubSub(id []byte, data []byte) []byte {
+	res := make([]byte, 20+len(data))
+	res[3] = 0x0E // EVENT_PUBSUB_MSG
+	if len(id) == 16 {
+		copy(res[4:20], id)
+	}
+	copy(res[20:], data)
+	return res
+}
+
+func (p *ProtocolParser) FormatEventDirectMsg(id []byte, peerID string, data []byte) []byte {
+	peerIDBytes := []byte(peerID)
+	peerLen := len(peerIDBytes)
+	res := make([]byte, 20+2+peerLen+len(data))
+	res[3] = 0x0F // EVENT_DIRECT_MSG
+	if len(id) == 16 {
+		copy(res[4:20], id)
+	}
+	binary.BigEndian.PutUint16(res[20:22], uint16(peerLen))
+	copy(res[22:22+peerLen], peerIDBytes)
+	copy(res[22+peerLen:], data)
+	return res
+}
+
+func (p *ProtocolParser) FormatEventPeerDiscovered(peerID string) []byte {
+	peerIDBytes := []byte(peerID)
+	peerLen := len(peerIDBytes)
+	res := make([]byte, 20+2+peerLen)
+	res[3] = 0x10 // EVENT_PEER_DISCOVERED
+	// ID de 16 bytes inicializado en 0 (basta con crear el arreglo)
+	binary.BigEndian.PutUint16(res[20:22], uint16(peerLen))
+	copy(res[22:22+peerLen], peerIDBytes)
+	return res
 }

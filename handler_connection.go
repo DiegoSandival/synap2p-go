@@ -1,37 +1,75 @@
 package quicnet
 
 import (
+	"context"
+	"strings"
+
 	"github.com/DiegoSandival/synap2p-go/protocol"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func (h *CentralHandler) Relay(parser *protocol.ProtocolParser, payload []byte) []byte {
-	_, err := parser.ParseU16LenPayload(payload) // Addr
+	id, addrBytes, err := parser.ParseSinglePayload(payload)
 	if err != nil {
-		return parser.ErrorResponse(0x01)
+		return parser.ErrorResponse(0x01, id)
 	}
-	// Lógica: Habilitar o conectar un circuit relay usando h.Host
-	return parser.SuccessResponse(0x01)
+
+	addr := string(addrBytes)
+	err = h.Client.ConnectToRelay(context.Background(), addr)
+	if err != nil {
+		return parser.ErrorResponse(0x01, id)
+	}
+
+	return parser.SuccessResponse(0x01, id)
 }
 
 func (h *CentralHandler) Dial(parser *protocol.ProtocolParser, payload []byte) []byte {
-	_, err := parser.ParseU16LenPayload(payload) // Addr
+	id, addrBytes, err := parser.ParseSinglePayload(payload)
 	if err != nil {
-		return parser.ErrorResponse(0x02)
+		return parser.ErrorResponse(0x02, id)
 	}
-	// Lógica: h.Host.Connect(...) al peer solicitado
-	return parser.SuccessResponse(0x02)
+
+	addr := string(addrBytes)
+	err = h.Client.ConnectToPeer(context.Background(), addr)
+	if err != nil {
+		return parser.ErrorResponse(0x02, id)
+	}
+
+	return parser.SuccessResponse(0x02, id)
 }
 
 func (h *CentralHandler) Peers(parser *protocol.ProtocolParser, payload []byte) []byte {
-	// Lógica: Retornar lista de pares conectados h.Host.Network().Peers()
-	return parser.SuccessResponse(0x06)
+	id, _, err := parser.ParseSinglePayload(payload)
+	if err != nil {
+		return parser.ErrorResponse(0x06, id)
+	}
+
+	peers := h.Client.ConnectedPeers()
+	peerStrs := make([]string, len(peers))
+	for i, p := range peers {
+		peerStrs[i] = p.String()
+	}
+
+	// Joining peer IDs with a comma (or anything similar)
+	dataStr := strings.Join(peerStrs, ",")
+	return parser.SuccessDataResponse(0x06, id, []byte(dataStr))
 }
 
 func (h *CentralHandler) Disconnect(parser *protocol.ProtocolParser, payload []byte) []byte {
-	_, err := parser.ParseU16LenPayload(payload) // PeerID
+	id, peerBytes, err := parser.ParseSinglePayload(payload) // PeerID
 	if err != nil {
-		return parser.ErrorResponse(0x0C)
+		return parser.ErrorResponse(0x0C, id)
 	}
-	// Lógica: h.Host.Network().ClosePeer(...)
-	return parser.SuccessResponse(0x0C)
+
+	peerID, err := peer.Decode(string(peerBytes))
+	if err != nil {
+		return parser.ErrorResponse(0x0C, id)
+	}
+
+	err = h.Client.DisconnectPeer(peerID)
+	if err != nil {
+		return parser.ErrorResponse(0x0C, id)
+	}
+
+	return parser.SuccessResponse(0x0C, id)
 }

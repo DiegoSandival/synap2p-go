@@ -14,24 +14,24 @@ import (
 )
 
 const (
-	defaultClientKeyPath          = "client_identity.key"
-	defaultServerKeyPath          = "server_identity.key"
-	defaultMDNSServiceName        = "_synap2p._udp"
-	defaultProtocolPrefix         = "/synap2p"
-	defaultDirectProtocol         = protocol.ID("/p2plib/direct/1.0")
-	defaultUserAgent              = "synap2p-go/0.1"
-	defaultDiscoveryInterval      = 30 * time.Second
-	defaultProviderRefresh        = 15 * time.Minute
-	defaultMaxPubSubMessageSize   = 1 << 20
-	defaultConnLowWater           = 64
-	defaultConnHighWater          = 96
-	defaultConnGracePeriod        = time.Minute
-	defaultDialTimeout            = 15 * time.Second
-	defaultClientListenAddrIPv4   = "/ip4/0.0.0.0/udp/0/quic-v1"
-	defaultClientListenAddrIPv6   = "/ip6/::/udp/0/quic-v1"
-	defaultServerListenAddrIPv4   = "/ip4/0.0.0.0/udp/4001/quic-v1"
-	defaultServerListenAddrIPv6   = "/ip6/::/udp/4001/quic-v1"
-	defaultTopicDiscoveryPrefix   = "pubsub:"
+	defaultClientKeyPath        = "client_identity.key"
+	defaultServerKeyPath        = "server_identity.key"
+	defaultMDNSServiceName      = "_synap2p._udp"
+	defaultProtocolPrefix       = "/synap2p"
+	defaultDirectProtocol       = protocol.ID("/p2plib/direct/1.0")
+	defaultUserAgent            = "synap2p-go/0.1"
+	defaultDiscoveryInterval    = 30 * time.Second
+	defaultProviderRefresh      = 15 * time.Minute
+	defaultMaxPubSubMessageSize = 1 << 20
+	defaultConnLowWater         = 64
+	defaultConnHighWater        = 96
+	defaultConnGracePeriod      = time.Minute
+	defaultDialTimeout          = 15 * time.Second
+	defaultClientListenAddrIPv4 = "/ip4/0.0.0.0/udp/0/quic-v1"
+	defaultClientListenAddrIPv6 = "/ip6/::/udp/0/quic-v1"
+	defaultServerListenAddrIPv4 = "/ip4/0.0.0.0/udp/4001/quic-v1"
+	defaultServerListenAddrIPv6 = "/ip6/::/udp/4001/quic-v1"
+	defaultTopicDiscoveryPrefix = "pubsub:"
 )
 
 type DirectMessageHandler func(ctx context.Context, from peer.ID, data []byte)
@@ -69,6 +69,7 @@ type clientConfig struct {
 	protocolPrefix           protocol.ID
 	directProtocol           protocol.ID
 	directHandler            DirectMessageHandler
+	eventHandler             EventHandler
 	connLowWater             int
 	connHighWater            int
 	connGracePeriod          time.Duration
@@ -114,7 +115,7 @@ func defaultClientConfig() clientConfig {
 		topicDiscoveryPrefix:     defaultTopicDiscoveryPrefix,
 		forceReachabilityPrivate: false,
 	}
-	}
+}
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
@@ -129,7 +130,7 @@ func defaultServerConfig() serverConfig {
 		forceReachabilityPublic: true,
 		relayResources:          relayv2.DefaultResources(),
 	}
-	}
+}
 
 func WithKeyPath(path string) Option {
 	return option{
@@ -189,6 +190,30 @@ func WithStaticRelays(relayAddrs ...string) Option {
 	return option{
 		client: func(cfg *clientConfig) error {
 			cfg.staticRelays = append([]peer.AddrInfo(nil), infos...)
+			return nil
+		},
+	}
+}
+
+type EventHandler func(event []byte)
+
+func WithEventHandler(handler EventHandler) Option {
+	return option{
+		client: func(cfg *clientConfig) error {
+			cfg.eventHandler = handler
+			return nil
+		},
+	}
+}
+
+func WithLogger(logger LogHandler) Option {
+	return option{
+		client: func(cfg *clientConfig) error {
+			globalLogHandler = logger
+			return nil
+		},
+		server: func(cfg *serverConfig) error {
+			globalLogHandler = logger
 			return nil
 		},
 	}
