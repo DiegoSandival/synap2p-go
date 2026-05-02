@@ -1,0 +1,39 @@
+# Modo del nodo. Usa "hybrid" para actuar como cliente y, si es necesario,
+# anunciarse también como relay/backbone ligero.
+mode: hybrid
+
+# Puerto UDP para QUIC. Usa 0 para que el sistema asigne uno dinámicamente.
+listen_port: 0
+
+# Identificador lógico de tu aplicación. Se usa para derivar prefijos y
+# aislar esta red de otras implementaciones que compartan la misma máquina.
+app_id: synap2p-basic-demo
+
+# Namespace donde los relays se anuncian en la DHT.
+namespace: _mi_red_relays
+
+# Directorio donde la librería persistirá la identidad del nodo.
+# Mantener este valor estable evita que el PeerID cambie entre reinicios.
+data_dir: ./data
+
+# Activa el perfil híbrido aunque el modo ya sea "hybrid". Si cambias a
+# mode: client, este flag permite promover automáticamente a un nodo híbrido.
+enable_relay: true
+
+# Lista de bootstrap peers. Déjala vacía para pruebas aisladas o complétala
+# con al menos un relay/backbone conocido para unirte a una red existente.
+bootstrap_list: []
+# bootstrap_list:
+#   - /ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooWExampleRelayPeerID
+
+# Intervalo con el que un relay híbrido o servidor vuelve a anunciarse.
+relay_advertise_interval: 30s
+
+# Intervalo usado por el discovery de tópicos/pubsub.
+discovery_interval: 30s
+
+# Intervalo de refresco de providers DHT para contenidos anunciados.
+provider_refresh_interval: 15m
+
+# Tamaño del buffer interno de eventos expuestos por Node.Events().
+event_buffer: 128

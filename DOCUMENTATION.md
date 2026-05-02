@@ -2,6 +2,50 @@
 
 `synap2p-go` es un motor de red P2P incrustable, 100% asíncrono y diseñado para ser manejado puramente mediante arreglos de bytes (`[]byte`).
 
+## Getting Started
+
+La forma recomendada de arrancar la librería es con `LoadConfig` + `NewNode`.
+
+```go
+import (
+    "context"
+    "fmt"
+    "log"
+
+    quicnet "github.com/DiegoSandival/synap2p-go"
+)
+
+func main() {
+    cfg, err := quicnet.LoadConfig("examples/basic/config.yaml")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    node, err := quicnet.NewNode(cfg)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer node.Close()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    if err := node.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+
+    if _, err := node.Subscribe("demo.chat"); err != nil {
+        log.Fatal(err)
+    }
+
+    for event := range node.Events() {
+        fmt.Printf("opcode=0x%02X payload=%x\n", event[3], event[20:])
+    }
+}
+```
+
+El ejemplo completo está en [examples/basic/main.go](/c:/Users/Starnet/Code/synap2p-go/examples/basic/main.go) y su configuración en [examples/basic/config.yaml](/c:/Users/Starnet/Code/synap2p-go/examples/basic/config.yaml).
+
 ## Uso Básico (El Ciclo de Vida)
 
 El motor funciona bajo un esquema muy simple: **Instanciar -> Inyectar Bytes -> Escuchar Eventos**.
@@ -70,6 +114,21 @@ if err := node.SendOpcode(0x0D, requestID, []byte("payload")); err != nil {
 ```
 
 Si prefieres archivo, puedes cargarlo con `LoadConfig("config.yaml")` o `LoadConfig("config.json")` y luego pasarlo a `NewNode`.
+
+### Helpers de Alto Nivel
+
+El tipo `Node` expone wrappers ergonómicos sobre los opcodes más comunes y genera el `request ID` automáticamente:
+
+* `Subscribe(topic string)`
+* `Publish(topic string, data []byte)`
+* `SendMessage(peerID string, msg []byte)`
+* `GenerateCID(data []byte)`
+* `FindProviders(cid string)`
+* `AnnounceCID(cid string)`
+* `Dial(peerAddr string)`
+* `Relay(relayAddr string)`
+
+Todos devuelven el `request ID` generado para que puedas correlacionar la respuesta con los eventos recibidos por `Node.Events()`.
 
 ## Topología Recomendada
 

@@ -1,6 +1,7 @@
 package quicnet
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -84,6 +85,45 @@ func TestNewNodeHybridProcessesOpcodes(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for hybrid event")
+	}
+}
+
+func TestNodeHelpersGenerateCID(t *testing.T) {
+	t.Parallel()
+
+	node, cancel := newTestNode(t, Config{
+		Mode:       ModeClient,
+		ListenPort: 0,
+		DataDir:    t.TempDir(),
+		Namespace:  "_synap2p_test_relays",
+	})
+	defer cancel()
+	defer func() { _ = node.Close() }()
+
+	requestID, err := node.GenerateCID([]byte("helper-cid"))
+	if err != nil {
+		t.Fatalf("generate cid helper: %v", err)
+	}
+	if len(requestID) != 16 {
+		t.Fatalf("unexpected request ID length: got %d want 16", len(requestID))
+	}
+
+	select {
+	case event := <-node.Events():
+		if len(event) < 21 {
+			t.Fatalf("event too short: %d", len(event))
+		}
+		if event[3] != OpcodeGenerateCID {
+			t.Fatalf("unexpected opcode: got 0x%02X want 0x%02X", event[3], OpcodeGenerateCID)
+		}
+		if !bytes.Equal(event[4:20], requestID) {
+			t.Fatalf("response ID mismatch: got %v want %v", event[4:20], requestID)
+		}
+		if event[20] != 0x01 {
+			t.Fatalf("unexpected status byte: got 0x%02X want 0x01", event[20])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for helper response")
 	}
 }
 

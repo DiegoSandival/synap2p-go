@@ -1,60 +1,83 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"time"
-
-	libp2p "github.com/libp2p/go-libp2p"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
 	quicnet "github.com/DiegoSandival/synap2p-go"
 )
 
 func main() {
-	fmt.Println("🚀 Iniciando ejemplo de Router P2P simplificado con ID de 16 bytes...")
-
-	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		log.Fatalf("Error creando host: %v", err)
+	configPath := filepath.Join(".", "config.yaml")
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
 	}
-	defer h.Close()
 
-	engine, err := quicnet.NewEngine(
-		quicnet.WithEventHandler(func(event []byte) {
-			if len(event) >= 4 {
-				opcode := event[3]
-				id := event[4:20]
-				fmt.Printf("📬 [EVENTO ASÍNCRONO] Recibido Opcode: 0x%02X, Origin ID: %v\n", opcode, id)
+	cfg, err := quicnet.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("Error cargando config %s: %v", configPath, err)
+	}
+
+	node, err := quicnet.NewNode(cfg)
+	if err != nil {
+		log.Fatalf("Error creando node: %v", err)
+	}
+	defer node.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := node.Start(ctx); err != nil {
+		log.Fatalf("Error arrancando node: %v", err)
+	}
+
+	fmt.Printf("Nodo %s levantado en modo %s\n", node.ID(), node.Mode())
+	for _, addr := range node.Addrs() {
+		fmt.Printf(" - %s/p2p/%s\n", addr, node.ID())
+	}
+
+	requestID, err := node.Subscribe("demo.chat")
+	if err != nil {
+		log.Fatalf("Error suscribiéndose al tópico: %v", err)
+	}
+	fmt.Printf("Suscripción solicitada. RequestID=%x\n", requestID)
+	fmt.Println("Esperando eventos. Publica desde otro nodo compatible para ver mensajes entrantes...")
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("Cerrando ejemplo basic...")
+			return
+		case event, ok := <-node.Events():
+			if !ok {
+				return
 			}
-		}),
-	)
-	if err != nil {
-		log.Fatalf("Error creando engine: %v", err)
+			printEvent(event)
+		}
 	}
-	defer engine.Close()
+}
 
-	// 5. Construimos el mensaje de Sub (0x03)
-	// Formato ideal = [Opcode: 4] + [ID: 16] + [Topic rest of bytes]
-	topic := "my-awesome-topic"
-	topicBytes := []byte(topic)
+func printEvent(event []byte) {
+	if len(event) < 20 {
+		fmt.Printf("Evento corto: %v\n", event)
+		return
+	}
 
-	msg := make([]byte, 20+len(topicBytes))
-	msg[3] = 0x03 // Opcode 0x03 = Sub
-
-	// Simulando un ID de 16 bytes: 010203...
-	id := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	copy(msg[4:20], id)
-
-	// El resto es la carga
-	copy(msg[20:], topicBytes)
-
-	fmt.Printf("\n📦 Mensaje (Opcode: %d, ID: %v, Tema: %s)\n", msg[3], id, topic)
-
-	engine.Process(msg)
-
-	// Esperamos un segundo para darle tiempo a la rutina asíncrona de regresar el evento a la consola.
-	// En Unity/Android, el EventHandler estará siempre activo recibiendo el callback.
-	fmt.Println("⏳ Solicitud lanzada, esperando respuesta asíncrona en hilo principal...")
-	time.Sleep(1 * time.Second)
-	fmt.Println("🚀 Fin de la simulación")
+	opcode := event[3]
+	requestID := event[4:20]
+	switch opcode {
+	case 0x0E:
+		fmt.Printf("[EVENT_PUBSUB_MSG] request=%x payload=%s\n", requestID, string(event[20:]))
+	case 0x0F:
+		fmt.Printf("[EVENT_DIRECT_MSG] request=%x raw=%x\n", requestID, event[20:])
+	case 0x10:
+		fmt.Printf("[EVENT_PEER_DISCOVERED] raw=%x\n", event[20:])
+	default:
+		fmt.Printf("[EVENT opcode=0x%02X] request=%x payload=%x\n", opcode, requestID, event[20:])
+	}
 }
