@@ -21,6 +21,7 @@ import (
 	mdns "github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	routingdiscovery "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	discoveryutil "github.com/libp2p/go-libp2p/p2p/discovery/util"
+	autorelay "github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	ma "github.com/multiformats/go-multiaddr"
 
@@ -81,6 +82,14 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 		return nil, err
 	}
 
+	var (
+		selfID           peer.ID
+		routingDiscovery *routingdiscovery.RoutingDiscovery
+	)
+	relayPeerSource := newRelayPeerSource(cfg, &selfID, func() *routingdiscovery.RoutingDiscovery {
+		return routingDiscovery
+	})
+
 	privKey, err := identity.LoadOrGenerateKey(cfg.keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("load client identity: %w", err)
@@ -95,18 +104,22 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 		DialTimeout:              cfg.dialTimeout,
 		UserAgent:                cfg.userAgent,
 		EnableRelay:              true,
+		EnableRelayService:       cfg.enableRelayService,
+		EnableNATService:         cfg.enableNATService,
 		EnableHolePunching:       true,
-		StaticRelays:             cfg.staticRelays,
+		AutoRelayPeerSource:      relayPeerSource,
+		RelayResources:           cfg.relayResources,
 		ForceReachabilityPrivate: cfg.forceReachabilityPrivate,
 		ForceReachabilityPublic:  cfg.forceReachabilityPublic,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build QUIC-only client host: %w", err)
 	}
+	selfID = h.ID()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dhtOptions := []dht.Option{
-		dht.Mode(dht.ModeClient),
+		dht.Mode(cfg.dhtMode),
 		dht.ProtocolPrefix(cfg.protocolPrefix),
 	}
 	if len(cfg.bootstrapPeers) > 0 {
@@ -127,7 +140,7 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 		return nil, fmt.Errorf("bootstrap client DHT: %w", err)
 	}
 
-	routingDiscovery := routingdiscovery.NewRoutingDiscovery(routing)
+	routingDiscovery = routingdiscovery.NewRoutingDiscovery(routing)
 	ps, err := pubsub.NewGossipSub(
 		ctx,
 		h,
@@ -158,6 +171,9 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 
 	h.SetStreamHandler(cfg.directProtocol, client.handleDirectStream)
 	client.bootstrapKnownPeers(append(append([]peer.AddrInfo(nil), cfg.bootstrapPeers...), cfg.staticRelays...))
+	if cfg.enableRelayService {
+		client.startRelayAdvertisement(cfg.relayDiscoveryNamespace, cfg.relayAdvertiseInterval)
+	}
 
 	service := mdns.NewMdnsService(h, cfg.mdnsServiceName, mdnsNotifee{handler: client.handleMDNSPeer})
 	if err := service.Start(); err != nil {
@@ -167,6 +183,108 @@ func NewClient(opts ...Option) (*ClientNode, error) {
 	client.mdnsService = service
 
 	return client, nil
+}
+
+func newRelayPeerSource(cfg clientConfig, selfID *peer.ID, getDiscovery func() *routingdiscovery.RoutingDiscovery) autorelay.PeerSource {
+	staticRelays := append([]peer.AddrInfo(nil), cfg.staticRelays...)
+	namespace := cfg.relayDiscoveryNamespace
+
+	return func(ctx context.Context, num int) <-chan peer.AddrInfo {
+		out := make(chan peer.AddrInfo, maxPeerSourceBuffer(num, len(staticRelays)))
+
+		go func() {
+			defer close(out)
+
+			seen := make(map[peer.ID]struct{}, len(staticRelays))
+			emitted := 0
+			emit := func(info peer.AddrInfo) bool {
+				if info.ID == "" || (selfID != nil && info.ID == *selfID) {
+					return false
+				}
+				if _, ok := seen[info.ID]; ok {
+					return false
+				}
+				seen[info.ID] = struct{}{}
+
+				select {
+				case <-ctx.Done():
+					return false
+				case out <- info:
+					emitted++
+					return true
+				}
+			}
+
+			for _, info := range staticRelays {
+				if reachedPeerSourceLimit(num, emitted) {
+					return
+				}
+				emit(info)
+			}
+
+			discovery := getDiscovery()
+			if discovery == nil || reachedPeerSourceLimit(num, emitted) {
+				return
+			}
+
+			peerCh, err := discovery.FindPeers(ctx, namespace)
+			if err != nil {
+				debugf("relay peer source lookup failed: namespace=%s err=%v", namespace, err)
+				return
+			}
+
+			for info := range peerCh {
+				if reachedPeerSourceLimit(num, emitted) {
+					return
+				}
+				emit(info)
+			}
+		}()
+
+		return out
+	}
+}
+
+func maxPeerSourceBuffer(num, fallback int) int {
+	if num > 0 {
+		return num
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 1
+}
+
+func reachedPeerSourceLimit(limit, emitted int) bool {
+	return limit > 0 && emitted >= limit
+}
+
+func (c *ClientNode) startRelayAdvertisement(namespace string, interval time.Duration) {
+	if c.routingDiscovery == nil || namespace == "" {
+		return
+	}
+
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+
+		advertise := func() {
+			discoveryutil.Advertise(c.ctx, c.routingDiscovery, namespace)
+		}
+
+		advertise()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-ticker.C:
+				advertise()
+			}
+		}
+	}()
 }
 
 func (c *ClientNode) ID() peer.ID {

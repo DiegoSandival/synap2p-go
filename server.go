@@ -3,22 +3,27 @@ package quicnet
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	routingdiscovery "github.com/libp2p/go-libp2p/p2p/discovery/routing"
+	discoveryutil "github.com/libp2p/go-libp2p/p2p/discovery/util"
 
 	"github.com/DiegoSandival/synap2p-go/internal/identity"
 	"github.com/DiegoSandival/synap2p-go/internal/node"
 )
 
 type ServerNode struct {
-	host   host.Host
-	dht    *dht.IpfsDHT
-	ctx    context.Context
-	cancel context.CancelFunc
-	closed bool
+	host             host.Host
+	dht              *dht.IpfsDHT
+	routingDiscovery *routingdiscovery.RoutingDiscovery
+	ctx              context.Context
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	closed           bool
 }
 
 func NewServer(opts ...Option) (*ServerNode, error) {
@@ -76,14 +81,17 @@ func NewServer(opts ...Option) (*ServerNode, error) {
 		_ = h.Close()
 		return nil, fmt.Errorf("bootstrap server DHT: %w", err)
 	}
+	routingDiscovery := routingdiscovery.NewRoutingDiscovery(routing)
 
 	server := &ServerNode{
-		host:   h,
-		dht:    routing,
-		ctx:    ctx,
-		cancel: cancel,
+		host:             h,
+		dht:              routing,
+		routingDiscovery: routingDiscovery,
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 	server.bootstrapKnownPeers(cfg.bootstrapPeers, cfg.dialTimeout)
+	server.startRelayAdvertisement(cfg.relayDiscoveryNamespace, cfg.relayAdvertiseInterval)
 	return server, nil
 }
 
@@ -106,6 +114,7 @@ func (s *ServerNode) Close() error {
 	}
 	s.closed = true
 	s.cancel()
+	s.wg.Wait()
 	if s.dht != nil {
 		_ = s.dht.Close()
 	}
@@ -113,6 +122,34 @@ func (s *ServerNode) Close() error {
 		_ = s.host.Close()
 	}
 	return nil
+}
+
+func (s *ServerNode) startRelayAdvertisement(namespace string, interval time.Duration) {
+	if s.routingDiscovery == nil || namespace == "" {
+		return
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		advertise := func() {
+			discoveryutil.Advertise(s.ctx, s.routingDiscovery, namespace)
+		}
+
+		advertise()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				advertise()
+			}
+		}
+	}()
 }
 
 func (s *ServerNode) bootstrapKnownPeers(peers []peer.AddrInfo, timeout time.Duration) {

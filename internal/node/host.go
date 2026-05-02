@@ -8,10 +8,11 @@ import (
 	crypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	autorelay "github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	connmgr "github.com/libp2p/go-libp2p/p2p/net/connmgr"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 )
 
 type HostConfig struct {
@@ -26,6 +27,7 @@ type HostConfig struct {
 	EnableRelayService       bool
 	EnableNATService         bool
 	EnableHolePunching       bool
+	AutoRelayPeerSource      autorelay.PeerSource
 	StaticRelays             []peer.AddrInfo
 	ForceReachabilityPrivate bool
 	ForceReachabilityPublic  bool
@@ -76,7 +78,9 @@ func NewHost(cfg HostConfig) (host.Host, error) {
 	if cfg.EnableHolePunching {
 		opts = append(opts, libp2p.EnableHolePunching())
 	}
-	if len(cfg.StaticRelays) > 0 {
+	if cfg.AutoRelayPeerSource != nil {
+		opts = append(opts, libp2p.EnableAutoRelayWithPeerSource(cfg.AutoRelayPeerSource))
+	} else if len(cfg.StaticRelays) > 0 {
 		opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(cfg.StaticRelays))
 	}
 	if cfg.ForceReachabilityPrivate {

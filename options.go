@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -18,9 +19,11 @@ const (
 	defaultServerKeyPath        = "server_identity.key"
 	defaultMDNSServiceName      = "_synap2p._udp"
 	defaultProtocolPrefix       = "/synap2p"
+	defaultRelayDiscoveryNS     = "_mi_red_relays"
 	defaultDirectProtocol       = protocol.ID("/p2plib/direct/1.0")
 	defaultUserAgent            = "synap2p-go/0.1"
 	defaultDiscoveryInterval    = 30 * time.Second
+	defaultRelayAdvertiseIntvl  = 30 * time.Second
 	defaultProviderRefresh      = 15 * time.Minute
 	defaultMaxPubSubMessageSize = 1 << 20
 	defaultConnLowWater         = 64
@@ -75,7 +78,13 @@ type clientConfig struct {
 	connGracePeriod          time.Duration
 	dialTimeout              time.Duration
 	userAgent                string
+	dhtMode                  dht.ModeOpt
+	enableRelayService       bool
+	enableNATService         bool
+	relayAdvertiseInterval   time.Duration
+	relayResources           relayv2.Resources
 	discoveryInterval        time.Duration
+	relayDiscoveryNamespace  string
 	providerRefreshInterval  time.Duration
 	maxPubSubMessageSize     int
 	forceReachabilityPrivate bool
@@ -93,6 +102,8 @@ type serverConfig struct {
 	connGracePeriod         time.Duration
 	dialTimeout             time.Duration
 	userAgent               string
+	relayDiscoveryNamespace string
+	relayAdvertiseInterval  time.Duration
 	forceReachabilityPublic bool
 	relayResources          relayv2.Resources
 }
@@ -109,7 +120,12 @@ func defaultClientConfig() clientConfig {
 		connGracePeriod:          defaultConnGracePeriod,
 		dialTimeout:              defaultDialTimeout,
 		userAgent:                defaultUserAgent,
+		dhtMode:                  dht.ModeClient,
+		enableNATService:         true,
+		relayAdvertiseInterval:   defaultRelayAdvertiseIntvl,
+		relayResources:           relayv2.DefaultResources(),
 		discoveryInterval:        defaultDiscoveryInterval,
+		relayDiscoveryNamespace:  defaultRelayDiscoveryNS,
 		providerRefreshInterval:  defaultProviderRefresh,
 		maxPubSubMessageSize:     defaultMaxPubSubMessageSize,
 		topicDiscoveryPrefix:     defaultTopicDiscoveryPrefix,
@@ -127,6 +143,8 @@ func defaultServerConfig() serverConfig {
 		connGracePeriod:         defaultConnGracePeriod,
 		dialTimeout:             defaultDialTimeout,
 		userAgent:               defaultUserAgent,
+		relayDiscoveryNamespace: defaultRelayDiscoveryNS,
+		relayAdvertiseInterval:  defaultRelayAdvertiseIntvl,
 		forceReachabilityPublic: true,
 		relayResources:          relayv2.DefaultResources(),
 	}
@@ -190,6 +208,28 @@ func WithStaticRelays(relayAddrs ...string) Option {
 	return option{
 		client: func(cfg *clientConfig) error {
 			cfg.staticRelays = append([]peer.AddrInfo(nil), infos...)
+			return nil
+		},
+	}
+}
+
+func WithRelayDiscoveryNamespace(namespace string) Option {
+	return option{
+		client: func(cfg *clientConfig) error {
+			cfg.relayDiscoveryNamespace = namespace
+			return nil
+		},
+		server: func(cfg *serverConfig) error {
+			cfg.relayDiscoveryNamespace = namespace
+			return nil
+		},
+	}
+}
+
+func WithRelayAdvertiseInterval(interval time.Duration) Option {
+	return option{
+		server: func(cfg *serverConfig) error {
+			cfg.relayAdvertiseInterval = interval
 			return nil
 		},
 	}
@@ -378,6 +418,9 @@ func validateClientConfig(cfg clientConfig) error {
 	if cfg.protocolPrefix == "" {
 		return fmt.Errorf("protocol prefix is required")
 	}
+	if cfg.relayDiscoveryNamespace == "" {
+		return fmt.Errorf("relay discovery namespace is required")
+	}
 	if cfg.discoveryInterval <= 0 {
 		return fmt.Errorf("discovery interval must be positive")
 	}
@@ -399,6 +442,12 @@ func validateServerConfig(cfg serverConfig) error {
 	}
 	if cfg.protocolPrefix == "" {
 		return fmt.Errorf("protocol prefix is required")
+	}
+	if cfg.relayDiscoveryNamespace == "" {
+		return fmt.Errorf("relay discovery namespace is required")
+	}
+	if cfg.relayAdvertiseInterval <= 0 {
+		return fmt.Errorf("relay advertise interval must be positive")
 	}
 	return nil
 }

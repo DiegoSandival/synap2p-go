@@ -25,6 +25,69 @@ engine.Process(msg)
 engine.Close()
 ```
 
+### Constructor Unificado con Config
+
+También puedes crear un nodo completo desde una estructura serializable a JSON o YAML.
+
+```go
+import (
+    "context"
+
+    quicnet "github.com/DiegoSandival/synap2p-go"
+)
+
+cfg := quicnet.Config{
+    Mode:          quicnet.ModeClient,
+    ListenPort:    0,
+    BootstrapList: []string{"/ip4/127.0.0.1/udp/4001/quic-v1/p2p/12D3KooW..."},
+    Namespace:     "_mi_red_relays",
+    DataDir:       "./data",
+}
+
+node, err := quicnet.NewNode(cfg)
+if err != nil {
+    panic(err)
+}
+defer node.Close()
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+if err := node.Start(ctx); err != nil {
+    panic(err)
+}
+
+go func() {
+    for event := range node.Events() {
+        _ = event
+    }
+}()
+
+requestID := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+if err := node.SendOpcode(0x0D, requestID, []byte("payload")); err != nil {
+    panic(err)
+}
+```
+
+Si prefieres archivo, puedes cargarlo con `LoadConfig("config.yaml")` o `LoadConfig("config.json")` y luego pasarlo a `NewNode`.
+
+## Topología Recomendada
+
+La red queda separada en dos perfiles:
+
+* **Servidores Relay**: Son nodos públicos que levantan `Relay v2`, participan en la DHT como backbone y se anuncian periódicamente en el namespace `_mi_red_relays`.
+* **Clientes Locales**: Son nodos ligeros que arrancan con `BootstrapPeers`, usan la DHT en modo cliente y delegan la selección y reconexión de relays al `AutoRelay` nativo de libp2p.
+
+En esta arquitectura, la biblioteca no programa un worker manual para failover de relays en el cliente. La recuperación de relays queda en manos de libp2p a través de `AutoRelay`.
+
+### Bootstrap Peers
+
+Para integrarse a la red, tanto el cliente como los relays pueden recibir peers semilla con `WithBootstrapPeers(...)`. En la práctica, el cliente necesita conocer al menos un relay o nodo backbone para que la DHT y el descubrimiento de relays funcionen correctamente.
+
+### Namespace de Relays
+
+El namespace de descubrimiento de relays se configura con `WithRelayDiscoveryNamespace(...)` y por defecto usa `_mi_red_relays`. Los relays dedicados también pueden ajustar la frecuencia de anuncio con `WithRelayAdvertiseInterval(...)`.
+
 ## Formato del Paquete (Buffer Binario)
 
 Todos los mensajes (Tanto los que envías a `Process()` como los que recibes en el `EventHandler`) comparten una estructura idéntica:
